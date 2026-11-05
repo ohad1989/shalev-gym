@@ -27,6 +27,12 @@
       "expo-router",
       "expo-sqlite"
     ],
-    "scheme": "shalevgym"
+    "scheme": "shalevgym",
+    "extra": {
+      "eas": {
+        "projectId": "70248306-1d43-4f26-91e8-370f3bb4f0dd"
+      }
+    },
+    "owner": "ohad1989"
   }
 }
