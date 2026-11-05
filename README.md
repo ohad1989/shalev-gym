@@ -13,6 +13,21 @@ Then press `w` for web, or scan the QR code with Expo Go on a phone.
 
 With no Supabase settings the app runs in local-only mode: there is no sign-in and data stays on the device.
 
+## Logging exercises
+
+During a workout, tap **Record exercise** after a set and say it, or type it in the field below. For example:
+
+- `bench press 80 kg 10, 10, 8`
+- `squat 3 sets of 5 at 100 kg`
+- `pull ups 12 reps to failure`
+- `squat 100 kg 5, 110 kg 3, 120 kg 1` (logged as a pyramid)
+- `superset curls 12 kg 10 with pushdown 50 pounds 12`
+- `end workout`
+
+Saying the same exercise again adds sets to it. Each exercise is saved straight away and has an **Edit** button for anything that was misheard. Set times are estimated from when you tapped Record.
+
+This is the free edition: speech becomes text on the device (Android's recognizer, or the browser's on web), and built-in rules read the text (`src/domain/exerciseLog.ts`). Voice needs a development or EAS build, not Expo Go.
+
 ## Connect Supabase
 
 1. Create a Supabase project.

@@ -1,7 +1,6 @@
-import { DatabaseSync } from 'node:sqlite';
-
 import { AUTO_END_IDLE_MS } from '../domain/workout';
 import { migrate, type Db } from './db';
+import { openTestDb } from './testDb';
 import {
   closeStaleWorkout,
   endWorkout,
@@ -10,20 +9,6 @@ import {
   listWorkouts,
   startWorkout,
 } from './workoutRepo';
-
-// Runs the repository's real SQL against Node's SQLite through the same calls expo-sqlite offers.
-function openTestDb(): Db {
-  const sqlite = new DatabaseSync(':memory:');
-  return {
-    execAsync: async (sql: string) => {
-      sqlite.exec(sql);
-    },
-    getFirstAsync: async (sql: string, params: never[] = []) =>
-      sqlite.prepare(sql).get(...params) ?? null,
-    getAllAsync: async (sql: string, params: never[] = []) => sqlite.prepare(sql).all(...params),
-    runAsync: async (sql: string, params: never[] = []) => sqlite.prepare(sql).run(...params),
-  } as unknown as Db;
-}
 
 const T0 = new Date('2026-11-02T08:00:00.000Z');
 const later = (ms: number) => new Date(T0.getTime() + ms);

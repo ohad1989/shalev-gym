@@ -10,6 +10,7 @@
     "expo-crypto": "~58.0.7",
     "expo-linking": "~58.0.15",
     "expo-router": "~58.0.29",
+    "expo-speech-recognition": "^58.0.1",
     "expo-sqlite": "~58.0.15",
     "expo-status-bar": "~58.0.4",
     "react": "19.3.0",

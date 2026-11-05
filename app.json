@@ -25,7 +25,14 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Shalev Gym uses the microphone so you can log exercises by voice.",
+          "speechRecognitionPermission": "Shalev Gym turns what you say into exercise logs."
+        }
+      ]
     ],
     "scheme": "shalevgym",
     "extra": {

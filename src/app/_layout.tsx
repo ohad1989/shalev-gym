@@ -37,6 +37,7 @@ function Routes() {
       <Stack.Protected guard={user !== null}>
         <Stack.Screen name="index" options={{ title: 'Shalev Gym' }} />
         <Stack.Screen name="workout/[id]" options={{ title: 'Workout' }} />
+        <Stack.Screen name="exercise/[id]" options={{ title: 'Edit exercise' }} />
       </Stack.Protected>
       <Stack.Protected guard={user === null}>
         <Stack.Screen name="sign-in" options={{ headerShown: false }} />
