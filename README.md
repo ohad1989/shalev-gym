@@ -15,18 +15,15 @@ With no Supabase settings the app runs in local-only mode: there is no sign-in a
 
 ## Logging exercises
 
-During a workout, tap **Record exercise** after a set and say it, or type it in the field below. For example:
+A workout is logged one exercise at a time:
 
-- `bench press 80 kg 10, 10, 8`
-- `squat 3 sets of 5 at 100 kg`
-- `pull ups 12 reps to failure`
-- `squat 100 kg 5, 110 kg 3, 120 kg 1` (logged as a pyramid)
-- `superset curls 12 kg 10 with pushdown 50 pounds 12`
-- `end workout`
+1. **Choose the exercise.** Tap the microphone and say it ("bench press", "next is lat pulldown", "curls superset with pushdowns"), type it with suggestions as you type, or tap a recent one. The app shows what it understood, with close alternatives, and you tap **Start** to confirm. Names it doesn't know can be added as a new exercise.
+2. **Record the sets.** After each set, tap **Record set** and say it: `80 kg 10 reps`, `80 for 10`, `8 reps` (same weight as the last set), `bodyweight 12 to failure`. Every set goes under the confirmed exercise. In a superset, sets alternate between the exercises.
+3. **Move on.** Say or tap **Next exercise**, or just say the next exercise's name and confirm it.
 
-Saying the same exercise again adds sets to it. Each exercise is saved straight away and has an **Edit** button for anything that was misheard. Set times are estimated from when you tapped Record.
+You can also say "same again", "undo" and "end workout", or use the matching buttons. A rest timer runs from the last set, and a finished exercise can be reopened with **+**. Each exercise has an **Edit** button for anything that was misheard. Set times come from when you tapped Record. **Delete workout** removes a workout and everything in it, after a confirmation.
 
-This is the free edition: speech becomes text on the device (Android's recognizer, or the browser's on web), and built-in rules read the text (`src/domain/exerciseLog.ts`). Voice needs a development or EAS build, not Expo Go.
+This is the free edition: speech becomes text on the device (Android's recognizer, or the browser's on web), and built-in rules read it (`src/domain/setLog.ts`, `src/domain/exerciseChoice.ts`, with the exercise list in `src/domain/exerciseCatalog.ts`). Voice and haptics need a development or EAS build, not Expo Go.
 
 ## Connect Supabase
 

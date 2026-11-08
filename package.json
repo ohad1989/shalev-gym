@@ -4,10 +4,12 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/metro-runtime": "~58.0.16",
+    "@expo/vector-icons": "^15.0.2",
     "@supabase/supabase-js": "^2.118.0",
     "expo": "~58.0.22",
     "expo-constants": "~58.0.14",
     "expo-crypto": "~58.0.7",
+    "expo-haptics": "~58.0.7",
     "expo-linking": "~58.0.15",
     "expo-router": "~58.0.29",
     "expo-speech-recognition": "^58.0.1",

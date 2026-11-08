@@ -47,6 +47,12 @@ const MIGRATIONS = [
   );
   CREATE INDEX exercise_sets_exercise ON exercise_sets (exercise_id, position);
   `,
+  // An exercise is chosen once, then its sets are logged until it is finished.
+  `
+  ALTER TABLE exercises ADD COLUMN muscle TEXT;
+  ALTER TABLE exercises ADD COLUMN finished_at TEXT;
+  UPDATE exercises SET finished_at = created_at;
+  `,
 ];
 
 export async function migrate(db: Db): Promise<void> {

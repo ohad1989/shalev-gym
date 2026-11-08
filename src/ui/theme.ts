@@ -7,7 +7,9 @@ const light = {
   text: '#171A17',
   textMuted: '#5C635C',
   accent: '#1F6F4A',
+  accentSoft: '#E1F0E7',
   onAccent: '#FFFFFF',
+  ripple: 'rgba(23, 26, 23, 0.12)',
   danger: '#B3261E',
   onDanger: '#FFFFFF',
 };
@@ -19,7 +21,9 @@ const dark: typeof light = {
   text: '#F0F2EF',
   textMuted: '#A3ABA3',
   accent: '#5CC895',
+  accentSoft: '#183A29',
   onAccent: '#0B1F15',
+  ripple: 'rgba(240, 242, 239, 0.16)',
   danger: '#F2B8B5',
   onDanger: '#3D0B08',
 };

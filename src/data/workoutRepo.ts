@@ -78,9 +78,43 @@ export async function startWorkout(
 }
 
 export async function endWorkout(db: Db, userId: string, id: string, now: Date): Promise<void> {
-  await db.runAsync(
+  const result = await db.runAsync(
     `UPDATE workouts SET ended_at = ?, end_reason = 'user'
      WHERE user_id = ? AND id = ? AND ended_at IS NULL`,
     [now.toISOString(), userId, id],
   );
+  if (result.changes === 0) return;
+  // An exercise chosen but never done is dropped; the rest are finished with the workout.
+  await db.runAsync(
+    `DELETE FROM exercises WHERE workout_id = ? AND finished_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM exercise_sets s WHERE s.exercise_id = exercises.id)`,
+    [id],
+  );
+  await db.runAsync('UPDATE exercises SET finished_at = ? WHERE workout_id = ? AND finished_at IS NULL', [
+    now.toISOString(),
+    id,
+  ]);
+}
+
+// Deletes a workout with its exercises and sets, all or nothing. Only the owner can.
+export async function deleteWorkout(db: Db, userId: string, id: string): Promise<void> {
+  await db.execAsync('BEGIN');
+  try {
+    const owned = await db.getFirstAsync<{ id: string }>(
+      'SELECT id FROM workouts WHERE user_id = ? AND id = ?',
+      [userId, id],
+    );
+    if (owned) {
+      await db.runAsync(
+        'DELETE FROM exercise_sets WHERE exercise_id IN (SELECT id FROM exercises WHERE workout_id = ?)',
+        [id],
+      );
+      await db.runAsync('DELETE FROM exercises WHERE workout_id = ?', [id]);
+      await db.runAsync('DELETE FROM workouts WHERE id = ?', [id]);
+    }
+    await db.execAsync('COMMIT');
+  } catch (error) {
+    await db.execAsync('ROLLBACK');
+    throw error;
+  }
 }

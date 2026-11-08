@@ -4,6 +4,7 @@ import {
   type ExpoSpeechRecognitionErrorCode,
 } from 'expo-speech-recognition';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated } from 'react-native';
 
 // Words the recognizer should expect, so "reps" isn't heard as "wraps".
 const GYM_WORDS = [
@@ -30,7 +31,9 @@ const MESSAGES: Partial<Record<ExpoSpeechRecognitionErrorCode, string>> = {
 
 // Speech to text on the device (free edition): Android's built-in recognizer, or the browser's on web.
 // onHeard receives the final text and the moment the user tapped Record, which is when the set ended.
-export function useSpeechToText(onHeard: (text: string, tappedAt: Date) => void) {
+// `level` follows the microphone volume from 0 to 1, for animating the record button without
+// re-rendering the screen.
+export function useSpeechToText(onHeard: (text: string, tappedAt: Date) => void, contextualStrings: string[] = []) {
   const [listening, setListening] = useState(false);
   const [partial, setPartial] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -38,12 +41,23 @@ export function useSpeechToText(onHeard: (text: string, tappedAt: Date) => void)
   const heard = useRef('');
   const lastPartial = useRef('');
   const onHeardRef = useRef(onHeard);
+  const [level] = useState(() => new Animated.Value(0));
+  const extraWords = useRef(contextualStrings);
+
+  useEffect(() => {
+    extraWords.current = contextualStrings;
+  }, [contextualStrings]);
 
   useEffect(() => {
     onHeardRef.current = onHeard;
   }, [onHeard]);
 
   useSpeechRecognitionEvent('start', () => setListening(true));
+
+  // The recognizer reports -2 to 10; below 0 is silence.
+  useSpeechRecognitionEvent('volumechange', (event) => {
+    level.setValue(Math.max(0, Math.min(1, event.value / 10)));
+  });
 
   useSpeechRecognitionEvent('result', (event) => {
     const text = event.results[0]?.transcript ?? '';
@@ -59,6 +73,7 @@ export function useSpeechToText(onHeard: (text: string, tappedAt: Date) => void)
 
   useSpeechRecognitionEvent('end', () => {
     setListening(false);
+    level.setValue(0);
     setPartial('');
     // Some recognizers end without a final result when stopped early: use what was heard.
     const text = heard.current || lastPartial.current;
@@ -91,7 +106,8 @@ export function useSpeechToText(onHeard: (text: string, tappedAt: Date) => void)
         lang: 'en-US',
         interimResults: true,
         continuous: false,
-        contextualStrings: GYM_WORDS,
+        contextualStrings: [...GYM_WORDS, ...extraWords.current],
+        volumeChangeEventOptions: { enabled: true, intervalMillis: 100 },
         // Leave room to pause between numbers: "eighty kilos... ten, ten, eight".
         androidIntentOptions: { EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 2500 },
       });
@@ -106,5 +122,12 @@ export function useSpeechToText(onHeard: (text: string, tappedAt: Date) => void)
     ExpoSpeechRecognitionModule.stop();
   }, []);
 
-  return { listening, partial, error, start, stop };
+  const cancel = useCallback(() => {
+    tappedAt.current = null;
+    heard.current = '';
+    lastPartial.current = '';
+    ExpoSpeechRecognitionModule.abort();
+  }, []);
+
+  return { listening, partial, error, level, start, stop, cancel };
 }

@@ -1,9 +1,7 @@
 import {
   estimateSetTimes,
-  sameExerciseName,
   type LoggedExercise,
   type LoggedSet,
-  type ParsedExercise,
   type ParsedSet,
   type Technique,
   type WeightUnit,
@@ -18,6 +16,9 @@ type ExerciseRow = {
   technique: Technique | null;
   superset_group: string | null;
   spoken_text: string | null;
+  muscle: string | null;
+  created_at: string;
+  finished_at: string | null;
 };
 
 type SetRow = {
@@ -55,6 +56,9 @@ function assemble(exercises: ExerciseRow[], sets: SetRow[]): LoggedExercise[] {
     technique: row.technique,
     supersetGroup: row.superset_group,
     spokenText: row.spoken_text,
+    muscle: row.muscle,
+    createdAt: row.created_at,
+    finishedAt: row.finished_at,
     sets: byExercise.get(row.id) ?? [],
   }));
 }
@@ -133,103 +137,182 @@ async function insertSet(
   );
 }
 
-export type LogInput = {
-  exercises: ParsedExercise[];
-  superset: boolean;
-  spokenText: string;
-  spokenAt: Date;
-};
+async function openWorkout(db: Db, userId: string, workoutId: string) {
+  const workout = await db.getFirstAsync<{ started_at: string; ended_at: string | null }>(
+    'SELECT started_at, ended_at FROM workouts WHERE user_id = ? AND id = ?',
+    [userId, workoutId],
+  );
+  if (!workout) throw new Error('The workout could not be found.');
+  if (workout.ended_at !== null) throw new Error('This workout has already ended.');
+  return workout;
+}
 
-// Saves what the user said after a set into the workout in progress. Saying the same exercise
-// again adds sets to it, so "bench press 80 kg 10" after each set builds one exercise
-// (requirement 6a). Returns the ids of the exercises that changed.
-export async function logExercises(
+async function touchWorkout(db: Db, workoutId: string, at: Date) {
+  await db.runAsync('UPDATE workouts SET last_activity_at = ? WHERE id = ?', [at.toISOString(), workoutId]);
+}
+
+// Finishes the exercises in progress. One that never got a set is removed, since it was
+// chosen and then not done.
+async function closeOpenExercises(db: Db, workoutId: string, at: Date) {
+  await db.runAsync(
+    `DELETE FROM exercises WHERE workout_id = ? AND finished_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM exercise_sets s WHERE s.exercise_id = exercises.id)`,
+    [workoutId],
+  );
+  await db.runAsync('UPDATE exercises SET finished_at = ? WHERE workout_id = ? AND finished_at IS NULL', [
+    at.toISOString(),
+    workoutId,
+  ]);
+}
+
+export type NewExercise = { name: string; muscle: string | null };
+
+// Starts the exercise the trainer confirmed, or two or more done as a superset. The ones in
+// progress are finished first. Returns the new exercises' ids, in order.
+export async function startExercise(
   db: Db,
   userId: string,
   workoutId: string,
-  input: LogInput,
+  exercises: NewExercise[],
+  spokenText: string | null,
+  at: Date,
   newId: () => string,
 ): Promise<string[]> {
+  const names = exercises.map((e) => ({ ...e, name: e.name.trim() }));
+  if (names.length === 0 || names.some((e) => !e.name)) throw new Error('The exercise needs a name.');
   return inTransaction(db, async () => {
-    const workout = await db.getFirstAsync<{ started_at: string; ended_at: string | null }>(
-      'SELECT started_at, ended_at FROM workouts WHERE user_id = ? AND id = ?',
-      [userId, workoutId],
+    await openWorkout(db, userId, workoutId);
+    await closeOpenExercises(db, workoutId, at);
+    const last = await db.getFirstAsync<{ position: number | null }>(
+      'SELECT MAX(position) AS position FROM exercises WHERE workout_id = ?',
+      [workoutId],
     );
-    if (!workout) throw new Error('The workout could not be found.');
-    if (workout.ended_at !== null) throw new Error('This workout has already ended.');
+    let position = (last?.position ?? -1) + 1;
+    const supersetGroup = names.length > 1 ? newId() : null;
+    const ids: string[] = [];
+    for (const exercise of names) {
+      const id = newId();
+      await db.runAsync(
+        `INSERT INTO exercises
+           (id, workout_id, user_id, position, name, technique, superset_group, spoken_text, muscle, created_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)`,
+        [id, workoutId, userId, position++, exercise.name, supersetGroup, spokenText, exercise.muscle, at.toISOString()],
+      );
+      ids.push(id);
+    }
+    await touchWorkout(db, workoutId, at);
+    return ids;
+  });
+}
+
+// Adds the sets the trainer just said to an exercise in progress. The set ended about when
+// they tapped Record; its start is estimated from the reps (requirement 6b).
+export async function logSets(
+  db: Db,
+  userId: string,
+  exerciseId: string,
+  sets: ParsedSet[],
+  technique: Technique | null,
+  at: Date,
+  newId: () => string,
+): Promise<LoggedSet[]> {
+  if (sets.length === 0) return [];
+  return inTransaction(db, async () => {
+    const exercise = await db.getFirstAsync<ExerciseRow>(
+      'SELECT * FROM exercises WHERE user_id = ? AND id = ?',
+      [userId, exerciseId],
+    );
+    if (!exercise) throw new Error('The exercise could not be found.');
+    const workout = await openWorkout(db, userId, exercise.workout_id);
 
     const lastSet = await db.getFirstAsync<{ ended_at: string | null }>(
       `SELECT MAX(s.ended_at) AS ended_at FROM exercise_sets s
        JOIN exercises e ON e.id = s.exercise_id WHERE e.workout_id = ?`,
-      [workoutId],
+      [exercise.workout_id],
     );
-    const windowStart = new Date(lastSet?.ended_at ?? workout.started_at);
-    const times = estimateSetTimes(input.exercises, input.superset, windowStart, input.spokenAt);
-
-    const last = await db.getFirstAsync<ExerciseRow & { set_count: number }>(
-      `SELECT e.*, (SELECT COUNT(*) FROM exercise_sets s WHERE s.exercise_id = e.id) AS set_count
-       FROM exercises e WHERE e.workout_id = ? ORDER BY e.position DESC LIMIT 1`,
-      [workoutId],
+    const windowStart = new Date(lastSet?.ended_at ?? exercise.created_at ?? workout.started_at);
+    const times = estimateSetTimes([{ name: exercise.name, sets, technique }], false, windowStart, at);
+    const count = await db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM exercise_sets WHERE exercise_id = ?',
+      [exerciseId],
     );
-    let position = (last?.position ?? -1) + 1;
-    const supersetGroup = input.superset ? newId() : null;
-    const changed: string[] = [];
 
-    for (const [exerciseIndex, exercise] of input.exercises.entries()) {
-      const continues =
-        last !== null &&
-        !input.superset &&
-        input.exercises.length === 1 &&
-        last.superset_group === null &&
-        sameExerciseName(last.name, exercise.name);
-
-      let exerciseId: string;
-      let firstSetPosition = 0;
-      if (continues) {
-        exerciseId = last.id;
-        firstSetPosition = last.set_count;
-        if (exercise.technique && !last.technique) {
-          await db.runAsync('UPDATE exercises SET technique = ? WHERE id = ?', [
-            exercise.technique,
-            exerciseId,
-          ]);
-        }
-      } else {
-        exerciseId = newId();
-        await db.runAsync(
-          `INSERT INTO exercises
-             (id, workout_id, user_id, position, name, technique, superset_group, spoken_text, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            exerciseId,
-            workoutId,
-            userId,
-            position++,
-            exercise.name,
-            exercise.technique,
-            supersetGroup,
-            input.spokenText,
-            input.spokenAt.toISOString(),
-          ],
-        );
-      }
-
-      for (const [setIndex, set] of exercise.sets.entries()) {
-        const time = times.find((t) => t.exerciseIndex === exerciseIndex && t.setIndex === setIndex);
-        await insertSet(db, newId(), exerciseId, userId, firstSetPosition + setIndex, set, {
-          startedAt: time?.startedAt ?? null,
-          endedAt: time?.endedAt ?? null,
-        });
-      }
-      changed.push(exerciseId);
+    const saved: LoggedSet[] = [];
+    for (const [index, set] of sets.entries()) {
+      const id = newId();
+      const time = { startedAt: times[index]?.startedAt ?? null, endedAt: times[index]?.endedAt ?? null };
+      await insertSet(db, id, exerciseId, userId, (count?.n ?? 0) + index, set, time);
+      saved.push({ ...set, unit: set.weight === null ? null : set.unit, id, ...time });
     }
-
-    await db.runAsync('UPDATE workouts SET last_activity_at = ? WHERE id = ?', [
-      input.spokenAt.toISOString(),
-      workoutId,
-    ]);
-    return changed;
+    if (technique && !exercise.technique) {
+      await db.runAsync('UPDATE exercises SET technique = ? WHERE id = ?', [technique, exerciseId]);
+    }
+    if (exercise.finished_at !== null) {
+      await db.runAsync('UPDATE exercises SET finished_at = NULL WHERE id = ?', [exerciseId]);
+    }
+    await touchWorkout(db, exercise.workout_id, at);
+    return saved;
   });
+}
+
+// Removes the most recent set of an exercise ("undo") and returns it.
+export async function deleteLastSet(
+  db: Db,
+  userId: string,
+  exerciseId: string,
+): Promise<LoggedSet | null> {
+  const row = await db.getFirstAsync<SetRow>(
+    `SELECT s.* FROM exercise_sets s JOIN exercises e ON e.id = s.exercise_id
+     WHERE e.user_id = ? AND s.exercise_id = ? ORDER BY s.position DESC LIMIT 1`,
+    [userId, exerciseId],
+  );
+  if (!row) return null;
+  await db.runAsync('DELETE FROM exercise_sets WHERE id = ?', [row.id]);
+  return toSet(row);
+}
+
+// "Next exercise": finishes what is in progress so the trainer can choose the next one.
+export async function finishExercises(db: Db, userId: string, workoutId: string, at: Date): Promise<void> {
+  await inTransaction(db, async () => {
+    await openWorkout(db, userId, workoutId);
+    await closeOpenExercises(db, workoutId, at);
+  });
+}
+
+// Goes back to an earlier exercise of this workout to add more sets to it.
+export async function resumeExercise(
+  db: Db,
+  userId: string,
+  exerciseId: string,
+  at: Date,
+): Promise<void> {
+  await inTransaction(db, async () => {
+    const exercise = await db.getFirstAsync<ExerciseRow>(
+      'SELECT * FROM exercises WHERE user_id = ? AND id = ?',
+      [userId, exerciseId],
+    );
+    if (!exercise) throw new Error('The exercise could not be found.');
+    await openWorkout(db, userId, exercise.workout_id);
+    await closeOpenExercises(db, exercise.workout_id, at);
+    if (exercise.superset_group) {
+      await db.runAsync('UPDATE exercises SET finished_at = NULL WHERE workout_id = ? AND superset_group = ?', [
+        exercise.workout_id,
+        exercise.superset_group,
+      ]);
+    } else {
+      await db.runAsync('UPDATE exercises SET finished_at = NULL WHERE id = ?', [exerciseId]);
+    }
+  });
+}
+
+// Exercise names this trainer used before, newest first: quick picks and better matching.
+export async function recentExerciseNames(db: Db, userId: string, limit = 12): Promise<string[]> {
+  const rows = await db.getAllAsync<{ name: string }>(
+    `SELECT name FROM exercises WHERE user_id = ?
+     GROUP BY lower(name) ORDER BY MAX(created_at) DESC LIMIT ?`,
+    [userId, limit],
+  );
+  return rows.map((row) => row.name);
 }
 
 export type ExerciseEdit = {

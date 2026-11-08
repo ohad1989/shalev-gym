@@ -3,7 +3,6 @@ import {
   formatSet,
   formatWeight,
   parseExerciseLog,
-  sameExerciseName,
   type ParsedExercise,
   type ParseResult,
 } from './exerciseLog';
@@ -155,11 +154,6 @@ describe('formatting', () => {
     expect(formatSet(set(80, 'kg', 10))).toBe('80 kg (176.4 lb) × 10 reps');
     expect(formatSet(set(null, null, 12, true))).toBe('12 reps to failure');
     expect(formatSet(set(null, null, null, true))).toBe('To failure');
-  });
-
-  it('matches exercise names loosely', () => {
-    expect(sameExerciseName('Pull-Ups', 'pull up')).toBe(true);
-    expect(sameExerciseName('Bench Press', 'Incline Press')).toBe(false);
   });
 });
 

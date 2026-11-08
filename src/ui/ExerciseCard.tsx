@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatSet, type LoggedExercise } from '@/domain/exerciseLog';
@@ -9,14 +10,18 @@ type Props = {
   exercise: LoggedExercise;
   inSuperset: boolean;
   onEdit: () => void;
+  // Shown while the workout is in progress, to add more sets to a finished exercise.
+  onResume?: () => void;
 };
 
-export function ExerciseCard({ exercise, inSuperset, onEdit }: Props) {
+export function ExerciseCard({ exercise, inSuperset, onEdit, onResume }: Props) {
   const theme = useTheme();
   const count = exercise.sets.length;
-  const tags = [inSuperset && 'Superset', exercise.technique && capitalize(exercise.technique)].filter(
-    Boolean,
-  ) as string[];
+  const tags = [
+    exercise.muscle,
+    inSuperset && 'Superset',
+    exercise.technique && capitalize(exercise.technique),
+  ].filter(Boolean) as string[];
 
   return (
     <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -27,14 +32,28 @@ export function ExerciseCard({ exercise, inSuperset, onEdit }: Props) {
             {[`${count} ${count === 1 ? 'set' : 'sets'}`, ...tags].join(' · ')}
           </Text>
         </View>
-        <Pressable
-          accessibilityLabel={`Edit ${exercise.name}`}
-          accessibilityRole="button"
-          hitSlop={8}
-          onPress={onEdit}
-          style={({ pressed }) => [styles.edit, { borderColor: theme.border }, pressed && styles.pressed]}>
-          <Text style={[styles.editLabel, { color: theme.accent }]}>Edit</Text>
-        </Pressable>
+        <View style={styles.actions}>
+          {onResume && (
+            <Pressable
+              accessibilityLabel={`Add more sets to ${exercise.name}`}
+              accessibilityRole="button"
+              android_ripple={{ color: theme.ripple }}
+              hitSlop={8}
+              onPress={onResume}
+              style={({ pressed }) => [styles.edit, { borderColor: theme.border }, pressed && styles.pressed]}>
+              <Ionicons color={theme.accent} name="add" size={18} />
+            </Pressable>
+          )}
+          <Pressable
+            accessibilityLabel={`Edit ${exercise.name}`}
+            accessibilityRole="button"
+            android_ripple={{ color: theme.ripple }}
+            hitSlop={8}
+            onPress={onEdit}
+            style={({ pressed }) => [styles.edit, { borderColor: theme.border }, pressed && styles.pressed]}>
+            <Text style={[styles.editLabel, { color: theme.accent }]}>Edit</Text>
+          </Pressable>
+        </View>
       </View>
 
       {exercise.sets.map((set, index) => (
@@ -64,7 +83,17 @@ const styles = StyleSheet.create({
   titleBlock: { flex: 1, minWidth: 0 },
   name: { fontSize: 18, fontWeight: '700' },
   meta: { fontSize: 14, marginTop: 2 },
-  edit: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
+  actions: { flexDirection: 'row', gap: 8 },
+  edit: {
+    minHeight: 38,
+    minWidth: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    overflow: 'hidden',
+  },
   editLabel: { fontSize: 15, fontWeight: '600' },
   pressed: { opacity: 0.6 },
   setRow: {

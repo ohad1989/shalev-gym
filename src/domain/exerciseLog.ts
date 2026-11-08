@@ -57,7 +57,7 @@ export function formatSet(set: ParsedSet): string {
 // ---------------------------------------------------------------------------
 // Reading the words
 
-type Token =
+export type Token =
   | { type: 'num'; value: number }
   | { type: 'unit'; unit: WeightUnit }
   | { type: 'reps' }
@@ -157,7 +157,7 @@ function readNumber(words: string[], start: number): { value: number; length: nu
   return { value, length };
 }
 
-function tokenize(text: string): Token[] {
+export function tokenize(text: string): Token[] {
   const words = normalize(text);
   const tokens: Token[] = [];
   for (let i = 0; i < words.length; ) {
@@ -204,7 +204,7 @@ const isNamePart = (token: Token) => token.type === 'word' && !FILLER.has(token.
 // Splits "curls 12 kg 10 with pushdown 20 kg 12" into one segment per exercise. A joining word
 // only starts a new exercise once the current one has numbers and a new name follows, so
 // "clean and jerk 60 kg 5" and "12 and 10 and 8" stay whole.
-function splitExercises(tokens: Token[]): Token[][] {
+export function splitExercises(tokens: Token[]): Token[][] {
   const segments: Token[][] = [[]];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
@@ -227,7 +227,7 @@ function splitExercises(tokens: Token[]): Token[][] {
   return segments.filter((segment) => segment.length > 0);
 }
 
-function titleCase(words: string[]): string {
+export function titleCase(words: string[]): string {
   return words
     .map((word) => (word.length <= 2 && word !== 'up' ? word.toUpperCase() : word))
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -238,23 +238,25 @@ function titleCase(words: string[]): string {
     .replace(/\bSit Ups?\b/i, (m) => m.replace(' ', '-'));
 }
 
-function readExercise(segment: Token[]): ParsedExercise | { error: string } {
-  // Filler words stay in a name only between two name words ("bench press with dumbbells").
-  const nameWords = segment.flatMap((token, k) => {
-    if (token.type !== 'word') return [];
-    if (isNamePart(token)) return [token.text];
-    const before = segment[k - 1];
-    const after = segment[k + 1];
-    return before && after && isNamePart(before) && isNamePart(after) ? [token.text] : [];
-  });
-  const stream = segment.filter((t) => t.type !== 'word' && t.type !== 'separator');
+export type SetReading = {
+  sets: ParsedSet[];
+  technique: Technique | null;
+  // False when nothing about weight was said ("10 reps"): the sets then use the last set's weight.
+  weightSaid: boolean;
+  // A weight was said but no reps, "80 kg".
+  weightOnly: boolean;
+};
 
+// Reads the sets in a stream of number, unit and keyword tokens. In 'set' mode (one exercise is
+// already chosen) "80 for 10" and "80 x 10" without a unit mean 80 of the current unit for 10 reps.
+export function readSets(stream: Token[], mode: 'log' | 'set' = 'log', defaultUnit: WeightUnit = 'kg'): SetReading {
   const sets: ParsedSet[] = [];
   let technique: Technique | null = null;
   // undefined: no weight said yet; null: bodyweight.
   let weight: { value: number; unit: WeightUnit } | null | undefined;
   let pendingCount: number | null = null;
   const waitingForWeight: ParsedSet[] = [];
+  const hasUnit = stream.some((t) => t.type === 'unit' || t.type === 'bodyweight');
 
   const push = (reps: number | null, count = 1, toFailure = false) => {
     for (let k = 0; k < count; k++) {
@@ -294,6 +296,27 @@ function readExercise(segment: Token[]): ParsedExercise | { error: string } {
       if (next?.type === 'unit') {
         setWeight({ value: token.value, unit: next.unit });
         i += 1;
+      } else if (
+        mode === 'set' &&
+        !hasUnit &&
+        weight === undefined &&
+        next?.type === 'times' &&
+        after?.type === 'num' &&
+        token.value > 5
+      ) {
+        // "80 for 10", "80 x 10": weight then reps.
+        setWeight({ value: token.value, unit: defaultUnit });
+        i += 1;
+      } else if (
+        mode === 'set' &&
+        !hasUnit &&
+        weight === undefined &&
+        sets.length === 0 &&
+        next?.type === 'num' &&
+        token.value >= 25
+      ) {
+        // "80 10": nobody does 80 reps, so the first number is the weight.
+        setWeight({ value: token.value, unit: defaultUnit });
       } else if ((next?.type === 'times' || next?.type === 'sets') && after?.type === 'num' && stream[i + 3]?.type !== 'unit') {
         // "3 x 10", "3 sets of 10", "3 by 10"
         const failure = stream[i + 3]?.type === 'failure';
@@ -315,23 +338,45 @@ function readExercise(segment: Token[]): ParsedExercise | { error: string } {
     }
   }
 
-  if (nameWords.length === 0) {
-    return { error: 'Start with the exercise name, for example "bench press 80 kg 10 reps".' };
-  }
-  if (sets.length === 0) {
-    if (weight === undefined) {
-      return { error: `I heard "${titleCase(nameWords)}" but no weight or reps.` };
-    }
-    push(null);
-  }
-
+  const weightSaid = weight !== undefined;
+  const weightOnly = sets.length === 0 && weight !== undefined && weight !== null;
   if (!technique && sets.length >= 3) {
     const kg = sets.map((s) => (s.weight === null || s.unit === null ? null : toKg(s.weight, s.unit)));
     const rising = kg.every((w, k) => k === 0 || (w !== null && kg[k - 1] !== null && w > kg[k - 1]!));
     if (rising) technique = 'pyramid';
   }
+  if (sets.length === 0 && weight !== undefined) push(null);
+  return { sets, technique, weightSaid, weightOnly };
+}
 
-  return { name: titleCase(nameWords), sets, technique };
+// The words of a segment that make up the exercise name. Filler words stay in a name only
+// between two name words ("bench press with dumbbells").
+export function nameWordsOf(segment: Token[]): string[] {
+  return segment.flatMap((token, k) => {
+    if (token.type !== 'word') return [];
+    if (isNamePart(token)) return [token.text];
+    const before = segment[k - 1];
+    const after = segment[k + 1];
+    return before && after && isNamePart(before) && isNamePart(after) ? [token.text] : [];
+  });
+}
+
+export const setTokens = (segment: Token[]) =>
+  segment.filter((t) => t.type !== 'word' && t.type !== 'separator');
+
+function readExercise(segment: Token[]): ParsedExercise | { error: string } {
+  const nameWords = nameWordsOf(segment);
+  const reading = readSets(setTokens(segment));
+
+  if (nameWords.length === 0) {
+    return { error: 'Start with the exercise name, for example "bench press 80 kg 10 reps".' };
+  }
+  const { sets } = reading;
+  if (sets.length === 0) {
+    return { error: `I heard "${titleCase(nameWords)}" but no weight or reps.` };
+  }
+
+  return { name: titleCase(nameWords), sets, technique: reading.technique };
 }
 
 const END_WORKOUT = /^(please )?(end|finish|stop|close)( (the|my|this))? (workout|training|session)( now)?( please)?$/;
@@ -412,11 +457,6 @@ export function estimateSetTimes(
   });
 }
 
-export function sameExerciseName(a: string, b: string): boolean {
-  const key = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/s$/, '');
-  return key(a) === key(b);
-}
-
 // ---------------------------------------------------------------------------
 // Saved exercises
 
@@ -433,5 +473,9 @@ export type LoggedExercise = {
   technique: Technique | null;
   supersetGroup: string | null;
   spokenText: string | null;
+  muscle: string | null;
+  createdAt: string;
+  // null while the trainer is still doing this exercise.
+  finishedAt: string | null;
   sets: LoggedSet[];
 };
